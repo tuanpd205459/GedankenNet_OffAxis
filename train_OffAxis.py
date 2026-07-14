@@ -14,6 +14,7 @@
 
 # %% init
 import os
+import random
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # SPECIFY YOUR GPU ID
 
@@ -33,7 +34,7 @@ from functools import partial
 
 from my_tools import (
     auto_detect_carrier,
-    GedankenOffAxisDataset,
+    RealOffAxisDataset,
     batch_offaxis_interference,
     count_params,
     min_max_norm,
@@ -65,11 +66,10 @@ def tv_loss(inputs):
 # Configs  -- THAY ĐỔI CÁC THÔNG SỐ NÀY THEO DỮ LIỆU CỦA ANH
 ################################################################
 
-TRAIN_PATH = ''       # Đường dẫn tới thư mục ảnh PNG nhân tạo (train)
-VALID_PATH = ''       # Đường dẫn tới thư mục ảnh PNG nhân tạo (valid)
-SAMPLE_HOLOGRAM = ''  # Đường dẫn tới 1 ảnh hologram thực tế để auto-detect mask
+DATA_RAW_PATH = 'data_raw'       # Đường dẫn tới thư mục ảnh thực tế (e.g. s1 (1).bmp)
+SAMPLE_HOLOGRAM = 'data_raw/s1 (1).bmp'  # Đường dẫn tới 1 ảnh hologram thực tế để auto-detect mask
 
-M = 2              # Số hologram per sample (2 góc tham chiếu)
+M = 2              # Số hologram per sample (ví dụ random 2 góc tham chiếu)
 modes = 256        # Số Fourier modes của FNO
 width = 4          # Độ rộng kênh của FNO
 batch_size = 1
@@ -113,35 +113,32 @@ def main():
     print("=" * 60)
 
     # ── 2. Load dataset ──────────────────────────────────────────────────
-    print("[Step 2] Loading datasets...")
-    train_file_paths = glob.glob(os.path.join(TRAIN_PATH, '*.png'))
-    train_dataset = GedankenOffAxisDataset(
-        train_file_paths, mask_plus1, M,
-        np_transforms.Compose([
-            np_transforms.RandomCrop(S),
-            np_transforms.RandomHorizontalFlip(),
-            np_transforms.ToTensor(),
-        ]),
-        params
-    )
+    print("[Step 2] Scanning real data and splitting Train/Valid...")
+    sample_dict = {}
+    for fname in os.listdir(DATA_RAW_PATH):
+        if fname.endswith('.bmp'):
+            prefix = fname.rsplit(' (', 1)[0]
+            if prefix not in sample_dict:
+                sample_dict[prefix] = []
+            sample_dict[prefix].append(os.path.join(DATA_RAW_PATH, fname))
+            
+    valid_samples = [k for k, v in sample_dict.items() if len(v) >= M]
+    random.shuffle(valid_samples)
+    
+    split_idx = int(len(valid_samples) * 0.8)
+    train_samples = valid_samples[:split_idx]
+    valid_samples_list = valid_samples[split_idx:]
+    
+    train_dataset = RealOffAxisDataset(train_samples, sample_dict, mask_plus1, M, S)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0
     )
 
-    valid_file_paths = glob.glob(os.path.join(VALID_PATH, '*.png'))
-    valid_dataset = GedankenOffAxisDataset(
-        valid_file_paths, mask_plus1, M,
-        np_transforms.Compose([
-            np_transforms.RandomCrop(S),
-            np_transforms.RandomHorizontalFlip(),
-            np_transforms.ToTensor(),
-        ]),
-        params
-    )
+    valid_dataset = RealOffAxisDataset(valid_samples_list, sample_dict, mask_plus1, M, S)
     valid_loader = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+        valid_dataset, batch_size=batch_size, shuffle=False, num_workers=0
     )
-    print(f"  -> Train: {len(train_file_paths)} files | Valid: {len(valid_file_paths)} files")
+    print(f"  -> Train: {len(train_samples)} samples | Valid: {len(valid_samples_list)} samples")
 
     # ── 3. Khởi tạo Model ────────────────────────────────────────────────
     # FNO2d(modes, width, in_dim=M, out_dim=1)
@@ -247,26 +244,21 @@ def main():
 
                 im, _ = model(xx)
 
-                # Lấy pha ground truth để tính MSE (monitoring)
-                gt_phase = torch.atan2(yy[:, 1:2, ...], yy[:, 0:1, ...]) / params['ph'] / np.pi
+                # Lấy pha dự đoán
+                gt_phase = torch.zeros_like(im) # Fake ground truth
                 valid_mse_sum += mseloss(im, gt_phase).item()
 
                 xx_list.append(xx[:, 0:1, ...].cpu().numpy())   # kênh hologram đầu tiên
-                yy_list.append((gt_phase - gt_phase.mean()).cpu().numpy())
                 im_list.append((im - im.mean()).cpu().numpy())
 
         valid_mse = valid_mse_sum / max(i + 1, 1)
 
         # TensorBoard logging
         xx_np = np.vstack(xx_list).reshape((-1,) + xx_list[0].shape[1:])
-        yy_np = np.vstack(yy_list).reshape((-1,) + yy_list[0].shape[1:])
         im_np = np.vstack(im_list).reshape((-1,) + im_list[0].shape[1:])
 
         writer.add_images('output_ph',
-            np.clip((im_np - yy_np.min()) / (yy_np.max() - yy_np.min() + 1e-8), 0, 1),
-            ep, dataformats='NCHW')
-        writer.add_images('target_ph',
-            (yy_np - yy_np.max()) / (yy_np.max() - yy_np.min() + 1e-8),
+            np.clip((im_np - im_np.min()) / (im_np.max() - im_np.min() + 1e-8), 0, 1),
             ep, dataformats='NCHW')
         writer.add_scalar('train_loss', train_loss_sum / batch_per_ep, ep)
         writer.add_scalar('valid_mse', valid_mse, ep)

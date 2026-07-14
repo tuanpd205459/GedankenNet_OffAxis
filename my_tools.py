@@ -343,6 +343,78 @@ class GedankenOffAxisDataset(torch.utils.data.Dataset):
 # Utility: đếm params model
 # ─────────────────────────────────────────────
 
+
+# ─────────────────────────────────────────────
+# DATASET CHO DỮ LIỆU THỰC TẾ (REAL DATA)
+# ─────────────────────────────────────────────
+
+class RealOffAxisDataset(torch.utils.data.Dataset):
+    """
+    Dataset để huấn luyện trực tiếp trên ảnh hologram thực tế.
+    Tự động nhóm các ảnh theo mẫu (sample) và lấy ngẫu nhiên M ảnh cùng mẫu.
+    Tự động dò kx, ky của từng ảnh lúc load dựa trên mask +1 có sẵn.
+    """
+    def __init__(self, sample_names, sample_dict, mask_plus1, M, S=512):
+        """
+        Args:
+            sample_names: list các tên mẫu (ví dụ: ['s1', 's2', ...])
+            sample_dict: dict chứa danh sách đường dẫn ảnh của từng mẫu.
+            mask_plus1: 2D bool mask [H, W] - vùng phổ +1 chung.
+            M: số lượng ảnh (góc) cần lấy ngẫu nhiên cho mỗi mẫu.
+            S: Kích thước crop.
+        """
+        self.sample_names = sample_names
+        self.sample_dict = sample_dict
+        self.mask_plus1 = mask_plus1
+        self.M = M
+        self.S = S
+        self.cx = S // 2
+        self.cy = S // 2
+
+    def __len__(self):
+        return len(self.sample_names)
+
+    def __getitem__(self, index):
+        sample_name = self.sample_names[index]
+        paths = self.sample_dict[sample_name]
+        
+        # Chọn ngẫu nhiên M góc chụp của cùng một mẫu
+        chosen_paths = random.sample(paths, self.M)
+        
+        holo_list = []
+        k_list = []
+        
+        for path in chosen_paths:
+            img = plt.imread(path)
+            if img.ndim == 3:
+                img = img[:, :, 0]
+            
+            # Center crop
+            h, w = img.shape
+            ch, cw = h // 2, w // 2
+            img = img[ch - self.S//2 : ch + self.S//2, cw - self.S//2 : cw + self.S//2]
+            img = img.astype(np.float32)
+            
+            # Normalize hologram 
+            img /= (img.mean() + 1e-8)
+            holo_list.append(img)
+            
+            # Dò tìm đỉnh kx, ky thực tế bên trong vùng mask
+            spectrum = np.abs(np.fft.fftshift(np.fft.fft2(img)))
+            masked_spectrum = spectrum * self.mask_plus1
+            ky0, kx0 = np.unravel_index(np.argmax(masked_spectrum), masked_spectrum.shape)
+            ky = float(ky0 - self.cy)
+            kx = float(kx0 - self.cx)
+            k_list.append((kx, ky))
+            
+        inp = np.stack(holo_list, axis=0)  # [M, H, W]
+        k_vecs = np.array(k_list, dtype=np.float32) # [M, 2]
+        
+        # Fake ground truth phase (to keep DataLoader output consistent with train loop)
+        tag = np.zeros((2, self.S, self.S), dtype=np.float32)
+        
+        return torch.Tensor(inp), torch.Tensor(tag), torch.Tensor(k_vecs)
+
 def count_params(model):
     c = 0
     for p in list(model.parameters()):
