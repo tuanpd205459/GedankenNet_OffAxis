@@ -67,8 +67,15 @@ def load_hologram(path, S):
     img = plt.imread(path)
     if img.ndim == 3:
         img = img[:, :, 0]
-    # Center crop về S x S
+    # Pad if smaller than S
     h, w = img.shape
+    if h < S or w < S:
+        pad_h = max(0, S - h)
+        pad_w = max(0, S - w)
+        img = np.pad(img, ((pad_h//2, pad_h - pad_h//2), (pad_w//2, pad_w - pad_w//2)), mode='symmetric')
+        h, w = img.shape
+
+    # Center crop về S x S
     ch, cw = h // 2, w // 2
     img = img[ch - S // 2:ch + S // 2, cw - S // 2:cw + S // 2]
     img = img.astype(np.float32)
