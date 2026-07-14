@@ -21,9 +21,10 @@ import numpy as np
 import scipy
 import scipy.io
 import scipy.signal
-import scipy.ndimage
+from scipy.ndimage import label
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 import skimage.measure
-from skimage.measure import label
 import PIL
 import torch.nn as nn
 import operator
@@ -70,81 +71,50 @@ def comp_field_norm(comp_field):
 # Vùng +1 được xác định là vùng PHẢI của trung tâm
 # ─────────────────────────────────────────────
 
-def auto_detect_carrier(hologram, n_steps=500, dc_mask_ratio=0.15):
+def auto_detect_carrier(hologram, dc_mask_ratio=0.15, threshold_ratio=0.05):
     """
-    Tự động phát hiện vùng phổ bậc +1 bằng cách giảm dần ngưỡng cường độ
-    cho đến khi xuất hiện đúng 3 vùng liên thông (bậc 0, +1, -1).
-    Vùng bậc +1 được chọn là vùng nằm bên PHẢI tâm ảnh.
-
-    Args:
-        hologram   : ảnh hologram thực tế, numpy 2D float [H, W]
-        n_steps    : số bước giảm ngưỡng
-        dc_mask_ratio: tỷ lệ vùng DC bị che (0.15 = 15% cạnh ngắn nhất)
-
-    Returns:
-        mask_plus1  : numpy 2D bool [H, W] - mask vùng phổ +1
-        kx0, ky0    : tọa độ trung tâm (cột, hàng) của đỉnh phổ +1
-                      trong hệ tọa độ đã fftshift (tâm ảnh = (H/2, W/2))
+    Tự động phát hiện vùng phổ bậc +1:
+    1. Che đi vùng DC (0th order).
+    2. Tìm đỉnh cường độ lớn nhất (chắc chắn là +1 hoặc -1).
+    3. Giữ lại các vùng có cường độ > 5% đỉnh.
+    4. Lọc ra vùng liên thông chứa cái đỉnh đó làm mask.
+    5. Đảm bảo vùng đó nằm bên PHẢI (nếu nằm bên trái thì lật lại).
     """
     H, W = hologram.shape[:2]
     cx, cy = W // 2, H // 2
 
-    # 1. Tính phổ biên độ (đã fftshift về trung tâm)
+    # 1. Tính phổ biên độ
     spectrum = np.abs(np.fft.fftshift(np.fft.fft2(hologram.astype(np.float64))))
 
-    # 2. Tạo DC mask để che vùng bậc 0 ở trung tâm
+    # 2. Tạo DC mask
     dc_r = int(min(H, W) * dc_mask_ratio)
     yy, xx = np.ogrid[:H, :W]
     dc_mask = (xx - cx) ** 2 + (yy - cy) ** 2 > dc_r ** 2
     spectrum_no_dc = spectrum * dc_mask
 
-    peak_val = spectrum_no_dc.max()
+    # 3. Tìm đỉnh cường độ lớn nhất
+    peak_y, peak_x = np.unravel_index(np.argmax(spectrum_no_dc), spectrum_no_dc.shape)
+    peak_val = spectrum_no_dc[peak_y, peak_x]
 
-    # 3. Giảm dần ngưỡng cho đến khi xuất hiện đúng 3 vùng liên thông
-    best_mask = None
-    best_n_regions = 0
-    for step in range(n_steps):
-        # Ngưỡng từ peak_val xuống tới ~5% peak
-        threshold = peak_val * (1.0 - step / n_steps * 0.95)
-        binary = (spectrum_no_dc >= threshold).astype(np.uint8)
-        labeled, n_regions = label(binary, return_num=True)
-        if n_regions == 3:
-            best_mask = binary
-            best_n_regions = 3
-            break
-        elif n_regions < 3:
-            # Lưu lại kết quả gần nhất có ít hơn 3 vùng để dự phòng
-            best_mask = binary
-            best_n_regions = n_regions
+    # 4. Ngưỡng tương đối (ví dụ: > 5% của đỉnh)
+    threshold = peak_val * threshold_ratio
+    binary = (spectrum_no_dc > threshold).astype(np.uint8)
 
-    # Nếu không tìm thấy đúng 3 vùng, dùng kết quả tốt nhất
-    if best_n_regions != 3:
-        print(f"[WARN] auto_detect_carrier: found {best_n_regions} regions, expected 3. Using best result.")
+    # 5. Lọc vùng liên thông chứa đỉnh
+    labeled, n_regions = label(binary, return_num=True)
+    peak_label = labeled[peak_y, peak_x]
+    mask_peak = (labeled == peak_label).astype(bool)
 
-    labeled, _ = label(best_mask, return_num=True)
+    # 6. Ép vùng này phải nằm bên phải (kx > 0)
+    # Nếu đỉnh đang nằm bên trái (peak_x < cx), ta lấy đối xứng qua tâm
+    if peak_x < cx:
+        mask_peak = mask_peak[::-1, ::-1]
+        peak_y, peak_x = H - 1 - peak_y, W - 1 - peak_x
 
-    # 4. Chọn vùng +1: vùng có tọa độ trung tâm nằm bên PHẢI của tâm ảnh (cx)
-    regions = []
-    for region_id in range(1, _.max() + 1 if hasattr(_, 'max') else 4):
-        pass
-    # Lấy tất cả vùng và chọn vùng bên phải
-    from skimage.measure import regionprops
-    props = regionprops(labeled)
-    right_regions = [r for r in props if r.centroid[1] > cx]  # centroid[1] là cột (x)
+    ky0 = peak_y - cy
+    kx0 = peak_x - cx
 
-    if len(right_regions) == 0:
-        raise ValueError("Không tìm thấy vùng phổ +1 ở phía phải! Kiểm tra lại hologram đầu vào.")
-
-    # Chọn vùng phải có biên độ lớn nhất
-    plus1_region = max(right_regions, key=lambda r: spectrum[labeled == r.label].sum())
-    mask_plus1 = (labeled == plus1_region.label).astype(bool)
-
-    # 5. Tọa độ tâm của vùng +1 (hàng, cột)
-    # Trả về kx = cột - cx (lệch so với tâm), ky = hàng - cy
-    ky0 = plus1_region.centroid[0] - cy   # lệch theo chiều hàng
-    kx0 = plus1_region.centroid[1] - cx   # lệch theo chiều cột
-
-    return mask_plus1, kx0, ky0
+    return mask_peak, kx0, ky0
 
 
 def sample_k_from_mask(mask_plus1, cx, cy, n_samples=2):

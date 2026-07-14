@@ -244,9 +244,11 @@ def main():
 
                 im, _ = model(xx)
 
-                # Lấy pha dự đoán
-                gt_phase = torch.zeros_like(im) # Fake ground truth
-                valid_mse_sum += mseloss(im, gt_phase).item()
+                # Mô phỏng hologram từ pha dự đoán để đánh giá (Evaluation)
+                im_x = batch_offaxis_interference(im, kk, params)
+                
+                # Tính MSE giữa hologram mô phỏng và hologram thực tế
+                valid_mse_sum += mseloss(im_x, xx).item()
 
                 xx_list.append(xx[:, 0:1, ...].cpu().numpy())   # kênh hologram đầu tiên
                 im_list.append((im - im.mean()).cpu().numpy())
