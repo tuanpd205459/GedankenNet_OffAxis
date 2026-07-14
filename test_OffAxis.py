@@ -58,7 +58,7 @@ print("[Step 1] Auto-detecting +1 order spectrum mask...")
 sample_holo = plt.imread(SAMPLE_HOLOGRAM)
 if sample_holo.ndim == 3:
     sample_holo = sample_holo[:, :, 0]
-mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, n_steps=500, dc_mask_ratio=0.15)
+mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, dc_mask_ratio=0.15)
 print(f"  -> +1 order at kx={kx0:.1f}, ky={ky0:.1f}")
 plt.imsave(os.path.join(OUTPUT_DIR, 'mask_plus1.png'), mask_plus1.astype(float), cmap='gray')
 

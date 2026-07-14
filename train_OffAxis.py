@@ -103,7 +103,7 @@ def main():
     if sample_holo.ndim == 3:
         sample_holo = sample_holo[:, :, 0]  # Lấy kênh Gray
 
-    mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, n_steps=500, dc_mask_ratio=0.15)
+    mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, dc_mask_ratio=0.15)
     print(f"  -> Found +1 order at approx. kx={kx0:.1f}, ky={ky0:.1f} (pixel units from center)")
     print(f"  -> Mask +1 area: {mask_plus1.sum()} pixels")
 
