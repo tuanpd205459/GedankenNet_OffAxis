@@ -36,7 +36,7 @@ def main():
     print(f"✅ Đã tải Model: {best_model_path}")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = torch.load(best_model_path, map_location=device)
+    model = torch.load(best_model_path, map_location=device, weights_only=False)
     model.eval()
 
     print("\n🔍 [Bước 2] Đang chuẩn bị dữ liệu đánh giá...")

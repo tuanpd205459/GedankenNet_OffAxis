@@ -84,7 +84,7 @@ print(f"  -> Input tensor shape: {xx.shape}")
 
 # 3. Load model & Inference
 print("[Step 3] Loading model and running inference...")
-model = torch.load(MODEL_PATH, map_location=device)
+model = torch.load(MODEL_PATH, map_location=device, weights_only=False)
 model.eval()
 
 t1 = default_timer()
