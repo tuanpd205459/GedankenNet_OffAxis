@@ -38,6 +38,7 @@ from my_tools import (
     batch_offaxis_interference,
     count_params,
     min_max_norm,
+    pad_and_crop
 )
 from networks.fno import FNO2d
 import np_transforms
@@ -102,6 +103,8 @@ def main():
     sample_holo = plt.imread(SAMPLE_HOLOGRAM)
     if sample_holo.ndim == 3:
         sample_holo = sample_holo[:, :, 0]  # Lấy kênh Gray
+    
+    sample_holo = pad_and_crop(sample_holo, S)
 
     mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, dc_mask_ratio=0.15)
     print(f"  -> Found +1 order at approx. kx={kx0:.1f}, ky={ky0:.1f} (pixel units from center)")

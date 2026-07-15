@@ -25,7 +25,7 @@ import torch.nn.functional as F
 from timeit import default_timer
 
 from utilities import *
-from my_tools import auto_detect_carrier, min_max_norm
+from my_tools import auto_detect_carrier, min_max_norm, pad_and_crop
 
 
 ################################################################
@@ -58,6 +58,8 @@ print("[Step 1] Auto-detecting +1 order spectrum mask...")
 sample_holo = plt.imread(SAMPLE_HOLOGRAM)
 if sample_holo.ndim == 3:
     sample_holo = sample_holo[:, :, 0]
+sample_holo = pad_and_crop(sample_holo, S)
+
 mask_plus1, kx0, ky0 = auto_detect_carrier(sample_holo, dc_mask_ratio=0.15)
 print(f"  -> +1 order at kx={kx0:.1f}, ky={ky0:.1f}")
 plt.imsave(os.path.join(OUTPUT_DIR, 'mask_plus1.png'), mask_plus1.astype(float), cmap='gray')
@@ -67,17 +69,7 @@ def load_hologram(path, S):
     img = plt.imread(path)
     if img.ndim == 3:
         img = img[:, :, 0]
-    # Pad if smaller than S
-    h, w = img.shape
-    if h < S or w < S:
-        pad_h = max(0, S - h)
-        pad_w = max(0, S - w)
-        img = np.pad(img, ((pad_h//2, pad_h - pad_h//2), (pad_w//2, pad_w - pad_w//2)), mode='symmetric')
-        h, w = img.shape
-
-    # Center crop về S x S
-    ch, cw = h // 2, w // 2
-    img = img[ch - S // 2:ch + S // 2, cw - S // 2:cw + S // 2]
+    img = pad_and_crop(img, S)
     img = img.astype(np.float32)
     img /= img.mean()  # Chuẩn hóa
     return img
