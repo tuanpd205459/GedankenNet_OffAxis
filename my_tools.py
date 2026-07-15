@@ -318,6 +318,16 @@ class GedankenOffAxisDataset(torch.utils.data.Dataset):
 # DATASET CHO DỮ LIỆU THỰC TẾ (REAL DATA)
 # ─────────────────────────────────────────────
 
+def pad_and_crop(img, S):
+    h, w = img.shape
+    if h < S or w < S:
+        pad_h = max(0, S - h)
+        pad_w = max(0, S - w)
+        img = np.pad(img, ((pad_h//2, pad_h - pad_h//2), (pad_w//2, pad_w - pad_w//2)), mode='symmetric')
+        h, w = img.shape
+    ch, cw = h // 2, w // 2
+    return img[ch - S//2 : ch + S//2, cw - S//2 : cw + S//2]
+
 class RealOffAxisDataset(torch.utils.data.Dataset):
     """
     Dataset để huấn luyện trực tiếp trên ảnh hologram thực tế.
@@ -359,17 +369,7 @@ class RealOffAxisDataset(torch.utils.data.Dataset):
             if img.ndim == 3:
                 img = img[:, :, 0]
             
-            # Pad if smaller than S
-            h, w = img.shape
-            if h < self.S or w < self.S:
-                pad_h = max(0, self.S - h)
-                pad_w = max(0, self.S - w)
-                img = np.pad(img, ((pad_h//2, pad_h - pad_h//2), (pad_w//2, pad_w - pad_w//2)), mode='symmetric')
-                h, w = img.shape
-                
-            # Center crop
-            ch, cw = h // 2, w // 2
-            img = img[ch - self.S//2 : ch + self.S//2, cw - self.S//2 : cw + self.S//2]
+            img = pad_and_crop(img, self.S)
             img = img.astype(np.float32)
             
             # Normalize hologram 
